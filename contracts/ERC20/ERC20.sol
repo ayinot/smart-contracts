@@ -20,9 +20,8 @@ contract ERC20 is IERC20, ERC20Detailed {
 
     uint256 private _totalSupply;
 
-    constructor(uint256 totalSupply, string name, string symbol, uint8 decimals)
+    constructor(string name, string symbol, uint8 decimals)
     ERC20Detailed(name, symbol, decimals) public {
-        _totalSupply = totalSupply;
     }
 
     /**

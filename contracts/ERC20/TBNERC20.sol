@@ -11,12 +11,13 @@ import "../access/roles/RecoverRole.sol";
 contract TBNERC20 is ERC20, MinterRole, RecoverRole {
   /**
    * @dev Function to mint tokens
-   * @param to The address that will receive the minted tokens.
-   * @param value The amount of tokens to mint.
-   * @return A boolean that indicates if the operation was successful.
+   * @param totalSupply The total token supply to be minted
+   * @param name The amount of tokens to mint.
+   * @param symbol The three letter symbol for this token
+   * @param decimals The decimal precision display
    */
     constructor(uint256 totalSupply, string name, string symbol, uint8 decimals)
-    ERC20(totalSupply, name, symbol, decimals) public {
+    ERC20(name, symbol, decimals) public {
         mint(msg.sender, totalSupply);
         renounceMinter();
     }
@@ -33,7 +34,7 @@ contract TBNERC20 is ERC20, MinterRole, RecoverRole {
     * @param token address of the ERC20 contract
     */
     function recoverLost(IERC20 token) public onlyRecoverer {
-        token.transfer(owner(), token.balanceOf(this));
+        token.transfer(msg.sender, token.balanceOf(this));
     }
 
    /**
