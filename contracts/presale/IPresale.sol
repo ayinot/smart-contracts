@@ -58,7 +58,8 @@ interface IPresale {
     function initilize (uint256 presaleAllocation) external  returns (bool);
     
     // Presale Stage functions
-    function setupVest(ICrowdsale TBNCrowdsale, uint256[5] vestThresholds, uint256[3][5] vestSchedules) external returns (bool);
+    function setupVest (uint256[5] vestThresholds, uint256[3][5] vestSchedules) external returns (bool);
+    function setCrowdsale(ICrowdsale TBNCrowdsale) external returns (bool);
     function addPresaleBalance(address[] presaleAccounts, uint256[] values) external returns (bool);
     
     // Vesting Stage functions

@@ -37,7 +37,7 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
         uint256 extended;
     }
 
-    uint256 private _vestingBlock;
+    uint256 public vestingBlock;
 
     uint256 private _presaleAllocation;
 
@@ -49,8 +49,8 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
 
     VestSchedule[5] private _vestSchedules;
     
-    uint256 private MONTH_BLOCKS = 172800;
-    
+    //uint256 private MONTH_BLOCKS = 172800;
+    uint256 private MONTH_BLOCKS = 10;
     Stages public stages;
 
     IERC20 public erc20;
@@ -206,28 +206,28 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     function vest() external atStage(Stages.Vesting) returns (bool){
         uint256 currentBalance = _presaleBalances[msg.sender];
         require(currentBalance > 0, "must have tokens to vest");
-
+        
         if( _vestData[msg.sender].vestingBalance == 0 ) { // first vest call sets vestingBalance
             _vestData[msg.sender].vestingBalance = currentBalance;
-            _vestData[msg.sender].vestApproved = true;
-            emit VestApproved(msg.sender);
-            return true;
         }
 
         uint256 index = _getIndex(_vestData[msg.sender].vestingBalance);
         if(index > 0){ // not lowest tier follow the schedule
-            uint256 months = _vestSchedules[index.sub(1)].months;
-            uint256 initial = _vestSchedules[index.sub(1)].initial;
-            uint256 extended = _vestSchedules[index.sub(1)].extended;
+            uint256 months = _vestSchedules[index.sub(uint256(1))].months;
+            uint256 initial = _vestSchedules[index.sub(uint256(1))].initial;
+            uint256 extended = _vestSchedules[index.sub(uint256(1))].extended;
+            if( _vestData[msg.sender].vestApproved == false ) { // first vest call sets vestApproved for higher tiers
+                _vestData[msg.sender].vestApproved = true;
+                emit VestApproved(msg.sender);
+            }
         } else { // lowest tier can vest all but needs manager approval
             require(_vestData[msg.sender].vestApproved, "must be approved by manager role to prevent sybil attacks");
             _vestData[msg.sender].vestedAmount = currentBalance;
-            _presaleBalances[msg.sender].sub(currentBalance);
-        
-            erc20.transfer(msg.sender, currentBalance);
+            _presaleBalances[msg.sender] = _presaleBalances[msg.sender].sub(currentBalance);
             emit Vested(msg.sender, currentBalance);
+            erc20.transfer(msg.sender, currentBalance);
+            return true;
         }
-        
         
         if( _vestData[msg.sender].vestingPeriod == 0 ){ // first vest call sets vestingPeriod
             _vestData[msg.sender].vestingPeriod = MONTH_BLOCKS.mul(months); // these should be set to an internal map with struct for all vesting info
@@ -237,10 +237,10 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
         uint vestAmount = totalAllowance.sub(_vestData[msg.sender].vestedAmount);
 
         _vestData[msg.sender].vestedAmount = _vestData[msg.sender].vestedAmount.add(vestAmount);
-        _presaleBalances[msg.sender].sub(vestAmount);
-        
-        erc20.transfer(msg.sender, vestAmount);
+        _presaleBalances[msg.sender] = _presaleBalances[msg.sender].sub(vestAmount);
         emit Vested(msg.sender, vestAmount);
+        erc20.transfer(msg.sender, vestAmount);
+        return true;
     }
 
     /**
@@ -266,7 +266,6 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
 
     /**
     * @dev Setup the vesting rules to prepare for the vesting period. Note: must have deployed the crowdsale contract before calling this funciton
-    * @param TBNCrowdsale The TBN crowdsale obeject deployed as some address
     * @param vestThresholds An array of the TBN thresholds whereby the different vesting schedules apply
     * @param vestSchedules An array of the the vesting schedule information [#ofMonthsInSchedule, initialPrecentageToVest, monthlyPercentageToVest]
     *   Note: vestSchedules percentages have 4 decimal precision so 100% = 1000000, 16.667% = 166670
@@ -310,6 +309,7 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
         require(TBNCrowdsale.getERC20() == address(erc20), "Crowdsale contract must be assigned to the same ERC20 instance as this contract");
         crowdsale = TBNCrowdsale;
         emit SetCrowdsale(crowdsale);
+        return true;
     }
 
     /**
@@ -367,7 +367,7 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     * @dev Called to change the stage to Vesting. Can only be called by the crwodsale contract and will only be called when the Crowdsale begins
     */
     function startVestingStage() external onlyCrowdsale atStage(Stages.Presale) returns (bool) {
-        _vestingBlock = block.number;
+        vestingBlock = block.number;
         stages = Stages.Vesting;
         return true;
     }
@@ -409,14 +409,14 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     */
     function _calcVestAllowance(uint256 months, uint256 initial, uint256 extended) internal returns (uint256) {
         uint256 initialAllowance = _vestData[msg.sender].vestingBalance.mul(initial).div(1000000);
-        uint256 blocks = block.number.sub(_vestingBlock);
-        uint256 phase = _vestData[msg.sender].vestingPeriod.div(months);
+        uint256 blocks = block.number.sub(vestingBlock);
 
-        uint256 multiplier = blocks.div(phase);
+        uint256 multiplier = blocks.div(MONTH_BLOCKS);
+        
         if(multiplier >= months) {
             require(!_vestData[msg.sender].vested[months], "this phase has already been vested");
             _vestData[msg.sender].vested[months] = true;
-            return initialAllowance.add(_presaleBalances[msg.sender]);
+            return _vestData[msg.sender].vestingBalance;
         }
         require(!_vestData[msg.sender].vested[multiplier], "this phase has already been vested");
         uint256 extendedAllowance = _vestData[msg.sender].vestingBalance.mul(multiplier).mul(extended).div(1000000);
@@ -431,9 +431,9 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     */
     function _getIndex(uint256 vestingBalance) internal view returns (uint256) {
         uint256 index;
-        for (uint8 i = 0; i < _vestThresholds.length; i++) {
+        for (uint256 i = 0; i < _vestThresholds.length; i++) {
             if(vestingBalance >= _vestThresholds[i]) {
-                index.add(1);
+                index = i.add(uint256(1));
             }
         }
         return index;
