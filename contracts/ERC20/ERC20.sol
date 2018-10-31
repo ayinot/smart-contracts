@@ -66,7 +66,7 @@ contract ERC20 is IERC20, ERC20Detailed {
         _transfer(msg.sender, to, value);
         return true;
     }
-
+    
     /**
     * @dev Approve the passed address to spend the specified amount of tokens on behalf of msg.sender.
     * Beware that changing an allowance with this method brings the risk that someone may use both the old

@@ -18,7 +18,7 @@ contract TBNERC20 is ERC20, MinterRole, RecoverRole {
    */
     constructor(uint256 totalSupply, string name, string symbol, uint8 decimals)
     ERC20(name, symbol, decimals) public {
-        mint(msg.sender, totalSupply);
+        mint(fundkeeper, totalSupply);
         renounceMinter();
     }
 
@@ -33,7 +33,7 @@ contract TBNERC20 is ERC20, MinterRole, RecoverRole {
     * @dev Safety function for recovering missent ERC20 tokens
     * @param token address of the ERC20 contract
     */
-    function recoverLost(IERC20 token) public onlyRecoverer {
+    function recoverToken(IERC20 token) external onlyRecoverer {
         token.transfer(msg.sender, token.balanceOf(this));
     }
 
