@@ -49,8 +49,8 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
 
     VestSchedule[5] private _vestSchedules;
     
-    //uint256 private MONTH_BLOCKS = 172800;
-    uint256 private MONTH_BLOCKS = 10;
+    uint256 private MONTH_BLOCKS = 172800;
+
     Stages public stages;
 
     IERC20 public erc20;
@@ -345,12 +345,14 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     /**
     * @dev Manager role can move unapproved balances to a single address so that it may fall under a vesting schedule (in case a sybil attack was discovered)
     */
-    function moveBalance(address account, address to) external onlyManager atStage(Stages.Vesting) returns (bool) {
-        require(_presaleBalances[account] > 0, "this account must have a balance to move");
-        uint256 value = _presaleBalances[account];
-        _presaleBalances[account] = 0;
-        _presaleBalances[to] = _presaleBalances[to].add(value);
-        emit BalanceMoved(account, to, value);
+    function moveBalance(address[] accounts, address to) external onlyManager atStage(Stages.Vesting) returns (bool) {
+        for (uint32 i = 0; i < accounts.length; i++) {
+            require(_presaleBalances[accounts[i]] > 0, "this account must have a balance to move");
+            uint256 value = _presaleBalances[accounts[i]];
+            _presaleBalances[accounts[i]] = 0;
+            _presaleBalances[to] = _presaleBalances[to].add(value);
+            emit BalanceMoved(accounts[i], to, value);
+        }
         return true;
     }
 

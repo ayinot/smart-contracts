@@ -11,7 +11,7 @@ interface IPresale {
     /** 
     * Getters
     */ 
-    // the amount of toekns allocated to this presale contract
+    // the amount of tokens allocated to this presale contract
     function getPresaleAllocation() external view returns (uint256);
 
     // the remianing token supply not assigned to accounts
@@ -64,7 +64,7 @@ interface IPresale {
     
     // Vesting Stage functions
     function approveVest(address account) external returns (bool);
-    function moveBalance(address account, address to) external returns (bool);
+    function moveBalance(address[] accounts, address to) external returns (bool);
     
 
     /** 
