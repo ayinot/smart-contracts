@@ -237,7 +237,7 @@ const presaleTransfer = (from, to, amount) => {
         .then(function(data){
             buildTransaction(from, presaleDeployment, "", data, 15000)
             .then(function(tx){
-                web3.eth.sendTransaction(tx, (error, hash) => {
+                web3.eth.sendTransaction(tx, (error, hash) => { //this is for web and web3/MetaMask base... offline will be different.. it will include signing the raw txn and then sending using differnt web3 methods..
                     if (error) {
                         reject(error);
                         return;
@@ -264,7 +264,7 @@ const vest = (account) => {
         .then(function(data){
             buildTransaction(account, presaleDeployment, "", data, 15000)
             .then(function(tx){
-                web3.eth.sendTransaction(tx, (error, hash) => {
+                web3.eth.sendTransaction(tx, (error, hash) => { //this is for web and web3/MetaMask base... offline will be different.. it will include signing the raw txn and then sending using differnt web3 methods..
                     if (error) {
                         reject(error);
                         return;
