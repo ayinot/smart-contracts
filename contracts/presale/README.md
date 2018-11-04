@@ -41,7 +41,7 @@ For standard smart contracts like SafeMath, and the Roles design pattern we use 
 
 ### License
 
-All smart contracts are released under [MIT](LICENSE).
+All smart contracts are released under [MIT](https://github.com/tubiex/smart-contracts/LICENSE).
 
 [npm-image]: https://img.shields.io/npm/v/openzeppelin-solidity.svg
 [npm-url]: https://www.npmjs.com/package/openzeppelin-solidity
