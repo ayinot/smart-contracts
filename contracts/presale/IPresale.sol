@@ -10,81 +10,80 @@ interface IPresale {
 
     /** 
     * Getters
-    */ 
+    */
+
     // the amount of tokens allocated to this presale contract
     function getPresaleAllocation() external view returns (uint256);
 
-    // the remianing token supply not assigned to accounts
+    // the remaining token supply not assigned to accounts
     function totalPresaleSupply() external view returns (uint256);
+
+    // the total number of presale tokens distributed to presale accounts
+    function getPresaleDistribution() external view returns (uint256);
 
     // get an account's current presale token balance
     function presaleBalanceOf(address account) external view returns (uint256);
 
-    // get an account's static total vesting balance (returns 0 until user has called the vest() function or manager has called approveVest())
-    function getVestingBalance(address account) external view returns (uint256);
-
-    // get an account's vesting period in blocks (returns 0 until user has called the vest() function)
-    function getVestingPeriod(address account) external view returns (uint256);
-
-    // get an account's vesting schedule (returns based on presaleBalnce prior to Vesting Stage and vestingBalance after)
-    function getVestingSchedule(address account) external view returns (uint256, uint256, uint256);
-
-    // the total amount of tokens already vested and transferred out of this contract
-    function getVestedAmount(address account) external view returns (uint256);
-
-    // the vesting approval status fo this account (returns false until user has called the vest() function or manager has called approveVest())
-    function getVestApproved(address account) external view returns (bool);
-
-    // the ERC20 token deployment this presale contract is dependent on
+    // get the ERC20 token deployment this presale contract is dependent on
     function getERC20() external view returns (address);
 
-    // check the status of this contract to see if it has been set as ready to vest
-    function readyToVest() external view returns (bool);
+    // get the Crowdsale deployment this presale contract is attached to
+    function getCrowdsale() external view returns (address);
 
-   /** 
-    * Account Based Functionality
-    */ 
-    // Presale Stage functions
-    function presaleTransfer(address to, uint256 value) external returns (bool);
-
-    // Vesting Stage functions
-    function vest() external returns (bool);
-
+    /*** PresaleDeployed Stage functions ***/ 
 
     /** 
     * Manager Role Functionality
     */ 
-    // PresaleDeployed Stage functions
     function initilize (uint256 presaleAllocation) external  returns (bool);
     
     // Presale Stage functions
-    function setupVest (uint256[5] vestThresholds, uint256[3][5] vestSchedules) external returns (bool);
-    function setCrowdsale(ICrowdsale TBNCrowdsale) external returns (bool);
-    function addPresaleBalance(address[] presaleAccounts, uint256[] values) external returns (bool);
-    
-    // Vesting Stage functions
-    function approveVest(address account) external returns (bool);
-    function moveBalance(address[] accounts, address to) external returns (bool);
-    
 
     /** 
-    * Recoverer Role Functionality
+    * Manager Role Functionality
     */ 
-    // Vesting Stage functions
-    function recoverLost(IERC20 token_) external returns (bool);
+ 
+    // add presale tokens to accounts to allow for distribution during the Crowdsale claiming process
+    function addPresaleBalance(address[] presaleAccounts, uint256[] values) external returns (bool);
+
+    // subtract presale tokens from accounts to adjust their presale balance
+    function subPresaleBalance(address[] presaleAccounts, uint256[] values) external returns (bool);
     
+    // transfer some amount of tokens from one account to another
+    function presaleTransfer(address from, address to, uint256 value) external returns (bool);
+
+    // set the Crowdsale contract deployed address (required for initializing the Crowdsale)
+    function setCrowdsale(ICrowdsale TBNCrowdsale) external returns (bool);
+
 
     /** 
     * Crowdsale Only Functionality
     */
-    // Presale Stage functions
-    function startVestingStage() external returns (bool);
+    // ends the Presale Stage (thereby locking any account updating and tranferring the amount of distributed tokens to the Crowdsale contract for vested claiming)
+    function presaleEnd() external returns (bool);
+
+    // PresaleEnded Stage functions
+
+    /** 
+    * Recoverer Role Functionality
+    */
+    // allows recovery of missent tokens as well as recovery of un-distributed TBN once the Presale Stage has ended.
+    function recoverTokens(IERC20 token) external returns (bool);
 
 
     /** 
     * Events
     */
+    event PresaleInitialized(
+        uint256 presaleAllocation
+    );
+
     event PresaleBalanceAdded( 
+        address indexed presaleAccount, 
+        uint256 value
+    );
+
+    event PresaleBalanceASubtracted( 
         address indexed presaleAccount, 
         uint256 value
     );
@@ -95,28 +94,15 @@ interface IPresale {
         uint256 value
     );
 
-    event VestSetup(
-        uint256[5] vestThresholds, 
-        uint256[3][5] vestSchedules
-    );
-
     event SetCrowdsale(
         ICrowdsale crowdsale 
     );
 
-    event Vested(
-        address indexed account,
-        uint256 currentBalance
-    );
+    event PresaleEnded();
 
-    event VestApproved(
-        address indexed account
-    );
-
-    event BalanceMoved(
-        address indexed account,
-        address indexed to, 
-        uint256 value
+    event TokensRecovered(
+        IERC20 token, 
+        uint256 recovered
     );
 
 }

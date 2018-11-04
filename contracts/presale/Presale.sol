@@ -20,49 +20,23 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
 
     mapping (address => uint256) private _presaleBalances;
     
-    mapping (address => VestData) private _vestData;
-    
-    struct VestData {
-        mapping (uint256 => bool) vested; // flag if current pahse has already vested
-        uint256 vestingBalance; // the account balance when the vesting period started
-        uint256 vestingPeriod; // the total number of blocks this account is vested for
-        uint256 vestedAmount; // the amount of tokens already vested
-        bool vestApproved; // system flag to approve vesting
-         
-    }
-
-    struct VestSchedule {
-        uint256 months;
-        uint256 initial;
-        uint256 extended;
-    }
-
-    uint256 public vestingBlock;
-
     uint256 private _presaleAllocation;
 
     uint256 private _totalPresaleSupply;
-    
-    uint256[5] private _vestThresholds;
 
-    bool private _vestReady;
+    IERC20 private _erc20;
 
-    VestSchedule[5] private _vestSchedules;
-    
-    uint256 private MONTH_BLOCKS = 172800;
+    ICrowdsale private _crowdsale;
 
     Stages public stages;
 
-    IERC20 public erc20;
-
-    ICrowdsale public crowdsale;
     /*
      *  Enums
      */
     enum Stages {
         PresaleDeployed,
         Presale,
-        Vesting
+        PresaleEnded
     }
 
     /*
@@ -74,7 +48,7 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     }
 
     modifier onlyCrowdsale() {
-        require(msg.sender == address(crowdsale), "only the crowdsale can call this function");
+        require(msg.sender == address(_crowdsale), "only the crowdsale can call this function");
         _;
     }
 
@@ -83,25 +57,29 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     * @param token_ TBNERC20 token contract
     */
     constructor(
-        IERC20 token_
+        IERC20 token
     ) public {
-        require(token_ != address(0), "token address cannot be 0x0");
-        erc20 = token_;
+        require(token != address(0), "token address cannot be 0x0");
+        _erc20 = token;
         stages = Stages.PresaleDeployed;
     }
 
     /**
-    * @dev Fallback reverts any ETH payment 
+    * @dev Safety fallback reverts missent ETH payments 
     */
     function () public payable {
         revert (); 
     }  
 
-    /**
-    * @dev Total number of tokens available for presale distribution
+  /**
+    * @dev Safety function for recovering missent ERC20 tokens (and recovering the un-distributed allocation after PresaleEnded)
+    * @param token address of the ERC20 contract to recover
     */
-    function totalPresaleSupply() public view returns (uint256) {
-        return _totalPresaleSupply;
+    function recoverTokens(IERC20 token) external onlyRecoverer atStage(Stages.PresaleEnded) returns (bool) {
+        uint256 recovered = token.balanceOf(address(this));
+        token.transfer(msg.sender, recovered);
+        emit TokensRecovered(token, recovered);
+        return true;
     }
 
     /**
@@ -112,6 +90,20 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     }
 
     /**
+    * @dev Total number of presale tokens un-distributed to presale accounts
+    */
+    function totalPresaleSupply() public view returns (uint256) {
+        return _totalPresaleSupply;
+    }
+
+    /**
+    * @dev Total number of presale tokens distributed to presale accounts
+    */
+    function getPresaleDistribution() public view returns (uint256) {
+        return _presaleAllocation.sub(_totalPresaleSupply);
+    }
+
+    /**
     * @dev Gets the balance of the specified address.
     * @param account The address to query the balance of.
     * @return An uint256 representing the amount owned by the passed address.
@@ -119,128 +111,13 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     function presaleBalanceOf(address account) public view returns (uint256) {
         return _presaleBalances[account];
     }
-
-    /**
-    * @dev Gets the static vesting balance of the specified address.
-    * @param account The address to query the balance of.
-    * @return The static amount of total vesting balance.
-    */
-    function getVestingBalance(address account) public view atStage(Stages.Vesting) returns (uint256) {
-        return _vestData[account].vestingBalance;
-    }
-
-    /**
-    * @dev Gets the vesting period of the specified address.
-    * @param account The address to query the period of.
-    * @return The total vesting period in blocks.
-    */
-    function getVestingPeriod(address account) public view atStage(Stages.Vesting) returns (uint256) {
-        return _vestData[account].vestingPeriod;
-    }
-
-    /**
-    * @dev Gets the vesting schedule of this account (returns schedule based on presaleBalances if called before Vesting Stage, otherwise based on vestingBalance)
-    * @param account The address to vested amount
-    * @return The total amount of tokens vested by this account
-    */
-    function getVestingSchedule(address account) public view atStage(Stages.Vesting) returns (uint256, uint256, uint256) {
-        uint256 balance;
-        if(_getIndex(_vestData[account].vestingBalance) == 0) {
-            balance = _presaleBalances[account];
-        } else {
-            balance = _vestData[account].vestingBalance;
-        }
-        uint256 index = _getIndex(balance);
-        if(index > 0){ // higher tier schedules
-            uint256 months = _vestSchedules[index.sub(1)].months;
-            uint256 initial = _vestSchedules[index.sub(1)].initial;
-            uint256 extended = _vestSchedules[index.sub(1)].extended;
-            return (months, initial, extended);
-        } else { // lowest tier can vest all initially
-            return (0, 1000000, 0);
-        }
-    }
-
-    /**
-    * @dev Gets the amount of token already vest and sent out of this contract
-    * @param account The address to vested amount
-    * @return The total amount of tokens vested by this account
-    */
-    function getVestedAmount(address account) public view atStage(Stages.Vesting) returns (uint256) {
-        return _vestData[account].vestedAmount;
-    }
-
-    /**
-    * @dev Gets the vesting status of this account (returns 0 until account calls vest or manager calls vestingApproved)
-    * @param account The address to vested amount
-    * @return The total amount of tokens vested by this account
-    */
-    function getVestApproved(address account) public view atStage(Stages.Vesting) returns (bool) {
-        return _vestData[account].vestApproved;
-    }
     
     function getERC20() public view returns (address) {
-        return address(erc20);
+        return address(_erc20);
     }
 
-    // check the status of this contract to see if it has been set as ready to vest
-    function readyToVest() public view returns (bool) {
-        return _vestReady;
-    }
-
-    /**
-    * @dev Transfer presale tokens to another account
-    * @param to The address to transfer to.
-    * @param value The amount to be transferred.
-    * @return bool true on success
-    */
-    function presaleTransfer(address to, uint256 value) external atStage(Stages.Presale) returns (bool) {
-        _presaleTransfer(msg.sender, to, value);
-        return true;
-    }
-
-    /**
-    * @dev Vest and transfer any available vesting tokens based on schedule and approval
-    * @return True when successful
-    */
-    function vest() external atStage(Stages.Vesting) returns (bool){
-        uint256 currentBalance = _presaleBalances[msg.sender];
-        require(currentBalance > 0, "must have tokens to vest");
-        
-        if( _vestData[msg.sender].vestingBalance == 0 ) { // first vest call sets vestingBalance
-            _vestData[msg.sender].vestingBalance = currentBalance;
-        }
-
-        uint256 index = _getIndex(_vestData[msg.sender].vestingBalance);
-        if(index > 0){ // not lowest tier follow the schedule
-            uint256 months = _vestSchedules[index.sub(uint256(1))].months;
-            uint256 initial = _vestSchedules[index.sub(uint256(1))].initial;
-            uint256 extended = _vestSchedules[index.sub(uint256(1))].extended;
-            if( _vestData[msg.sender].vestApproved == false ) { // first vest call sets vestApproved for higher tiers
-                _vestData[msg.sender].vestApproved = true;
-                emit VestApproved(msg.sender);
-            }
-        } else { // lowest tier can vest all but needs manager approval
-            require(_vestData[msg.sender].vestApproved, "must be approved by manager role to prevent sybil attacks");
-            _vestData[msg.sender].vestedAmount = currentBalance;
-            _presaleBalances[msg.sender] = _presaleBalances[msg.sender].sub(currentBalance);
-            emit Vested(msg.sender, currentBalance);
-            erc20.transfer(msg.sender, currentBalance);
-            return true;
-        }
-        
-        if( _vestData[msg.sender].vestingPeriod == 0 ){ // first vest call sets vestingPeriod
-            _vestData[msg.sender].vestingPeriod = MONTH_BLOCKS.mul(months); // these should be set to an internal map with struct for all vesting info
-        }
-        uint256 totalAllowance = _calcVestAllowance(months, initial, extended);
-
-        uint vestAmount = totalAllowance.sub(_vestData[msg.sender].vestedAmount);
-
-        _vestData[msg.sender].vestedAmount = _vestData[msg.sender].vestedAmount.add(vestAmount);
-        _presaleBalances[msg.sender] = _presaleBalances[msg.sender].sub(vestAmount);
-        emit Vested(msg.sender, vestAmount);
-        erc20.transfer(msg.sender, vestAmount);
-        return true;
+    function getCrowdsale() public view returns (address) {
+        return address(_crowdsale);
     }
 
     /**
@@ -255,49 +132,35 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
         atStage(Stages.PresaleDeployed) 
         returns (bool) 
     {
-        address fundkeeper = erc20.fundkeeper();
-        require(erc20.allowance(address(fundkeeper), address(this)) == presaleAllocation, "presale allocation must be equal to the amount of tokens approved for this contract");
-        erc20.transferFrom(fundkeeper, address(this), presaleAllocation);
-        _presaleAllocation = erc20.balanceOf(address(this));
-        _totalPresaleSupply = erc20.balanceOf(address(this));
+        require(presaleAllocation > 0, "presaleAllocation must be greater than zero");
+        address fundkeeper = _erc20.fundkeeper();
+        require(_erc20.allowance(address(fundkeeper), address(this)) == presaleAllocation, "presale allocation must be equal to the amount of tokens approved for this contract");
+       
+
+        _presaleAllocation = presaleAllocation;
+        _totalPresaleSupply = presaleAllocation;
+
+        // place presale allocation in this contract (uses the approve/transferFrom pattern)
+        _erc20.transferFrom(fundkeeper, address(this), presaleAllocation);
         stages = Stages.Presale;
+        emit PresaleInitialized(presaleAllocation);
         return true;
     }
 
     /**
-    * @dev Setup the vesting rules to prepare for the vesting period. Note: must have deployed the crowdsale contract before calling this funciton
-    * @param vestThresholds An array of the TBN thresholds whereby the different vesting schedules apply
-    * @param vestSchedules An array of the the vesting schedule information [#ofMonthsInSchedule, initialPrecentageToVest, monthlyPercentageToVest]
-    *   Note: vestSchedules percentages have 4 decimal precision so 100% = 1000000, 16.667% = 166670
+    * @dev Transfer presale tokens to another account
+    * @param from The address to transfer from.
+    * @param to The address to transfer to.
+    * @param value The amount to be transferred.
+    * @return bool true on success
     */
-    function setupVest(
-        uint256[5] vestThresholds, 
-        uint256[3][5] vestSchedules
-    ) 
-        external 
-        onlyManager 
-        atStage(Stages.Presale) 
-        returns (bool) 
-    {
-        require(vestThresholds[0] > 0, "smallest vesting threshold should be larger than 0");
-        require(vestThresholds[4] < _presaleAllocation, "largest vesting threshold must be less than the presale allocation");
-        for (uint8 i = 0; i < vestSchedules.length; i++) {
-            if(i > 0){
-                require(vestThresholds[i] > vestThresholds[i-1], "every threshold must be larger than the last");
-            }
-        }
-        for (uint8 j = 0; j < vestSchedules.length; j++) {
-            _vestSchedules[j] = VestSchedule(vestSchedules[j][0], vestSchedules[j][1], vestSchedules[j][2]);
-        }
-        
-        _vestThresholds = vestThresholds;
-        _vestReady = true;
-        emit VestSetup(vestThresholds, vestSchedules);
+    function presaleTransfer(address from, address to, uint256 value) external onlyManager atStage(Stages.Presale) returns (bool) {
+        _presaleTransfer(from, to, value);
         return true;
     }
 
     /**
-    * @dev Set the crowdsale contract storage
+    * @dev Set the crowdsale contract storage (only contract Manger and only at Presale Stage)
     * @param TBNCrowdsale The crowdsale contract deployment
     */
     function setCrowdsale(ICrowdsale TBNCrowdsale)      
@@ -306,16 +169,16 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
         atStage(Stages.Presale) 
         returns (bool) 
     {
-        require(TBNCrowdsale.getERC20() == address(erc20), "Crowdsale contract must be assigned to the same ERC20 instance as this contract");
-        crowdsale = TBNCrowdsale;
-        emit SetCrowdsale(crowdsale);
+        require(TBNCrowdsale.getERC20() == address(_erc20), "Crowdsale contract must be assigned to the same ERC20 instance as this contract");
+        _crowdsale = TBNCrowdsale;
+        emit SetCrowdsale(_crowdsale);
         return true;
     }
 
     /**
-    * @dev Assign presale tokens to an account (only manager role and only at the Presale stage)
-    * @param presaleAccounts The account which is assigned presale holdings
-    * @param values The amount of tokens to be assigned to each account
+    * @dev Assign presale tokens to accounts (only contract Manger and only at Presale Stage)
+    * @param presaleAccounts The accounts to add presale token balances from
+    * @param values The amount of tokens to be add to each account
     */
     function addPresaleBalance(address[] presaleAccounts, uint256[] values) external onlyManager atStage(Stages.Presale) returns (bool) {
         require(presaleAccounts.length == values.length, "presaleAccounts and values must have one-to-one relationship");
@@ -327,50 +190,27 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     }
 
     /**
-    * @dev Manager role must approve vesting for accounts without a schedule
-    * @param account The account to have vesting approved
+    * @dev Subtract presale tokens to accounts (only contract Manger and only at Presale Stage)
+    * @param presaleAccounts The accounts to subtract presale token balances from
+    * @param values The amount of tokens to subtract from each account
     */
-    function approveVest(address account) external onlyManager atStage(Stages.Vesting) returns (bool) {
-        require(!_vestData[account].vestApproved, "this account must not have been previously approved");
-        require(_presaleBalances[account] > 0, "must have a balance to approve");
-        if( _vestData[msg.sender].vestingBalance == 0 ) { // first approve call sets vestingBalance if not already done
-            _vestData[msg.sender].vestingBalance = _presaleBalances[account];
-        }
-        require(_getIndex(_vestData[msg.sender].vestingBalance) == 0, "vesting balance must be small enough to not have a schedule");
-        _vestData[account].vestApproved = true;
-        emit VestApproved(account);
-        return true;
-    }
-
-    /**
-    * @dev Manager role can move unapproved balances to a single address so that it may fall under a vesting schedule (in case a sybil attack was discovered)
-    */
-    function moveBalance(address[] accounts, address to) external onlyManager atStage(Stages.Vesting) returns (bool) {
-        for (uint32 i = 0; i < accounts.length; i++) {
-            require(_presaleBalances[accounts[i]] > 0, "this account must have a balance to move");
-            uint256 value = _presaleBalances[accounts[i]];
-            _presaleBalances[accounts[i]] = 0;
-            _presaleBalances[to] = _presaleBalances[to].add(value);
-            emit BalanceMoved(accounts[i], to, value);
+    function subPresaleBalance(address[] presaleAccounts, uint256[] values) external onlyManager atStage(Stages.Presale) returns (bool) {
+        require(presaleAccounts.length == values.length, "presaleAccounts and values must have one-to-one relationship");
+        
+        for (uint32 i = 0; i < presaleAccounts.length; i++) {
+            _subPresaleBalance(presaleAccounts[i], values[i]);
         }
         return true;
     }
 
     /**
-    * @dev Safety function for recovering missent ERC20 tokens
-    * @param token_ address of the ERC20 contract to recover
+    * @dev Called to end presale Stage. Can only be called by the crowdsale contract and will only be called when the Crowdsale begins
     */
-    function recoverLost(IERC20 token_) external onlyRecoverer atStage(Stages.Vesting) returns (bool) {
-        token_.transfer(msg.sender, token_.balanceOf(address(this)));
-        return true;
-    }
-
-   /**
-    * @dev Called to change the stage to Vesting. Can only be called by the crwodsale contract and will only be called when the Crowdsale begins
-    */
-    function startVestingStage() external onlyCrowdsale atStage(Stages.Presale) returns (bool) {
-        vestingBlock = block.number;
-        stages = Stages.Vesting;
+    function presaleEnd() external onlyCrowdsale atStage(Stages.Presale) returns (bool) {
+        uint256 presaleDistribution = getPresaleDistribution();
+        _erc20.transfer(_crowdsale, presaleDistribution);
+        stages = Stages.PresaleEnded;
+        emit PresaleEnded();
         return true;
     }
 
@@ -390,55 +230,32 @@ contract Presale is IPresale, ManagerRole, RecoverRole {
     }
 
     /**
-    * @dev Assign presale tokens to an account (internal operation)
+    * @dev Add presale tokens to an account (internal operation)
     * @param presaleAccount The account which is assigned presale holdings
     * @param value The amount of tokens to be assigned to this account
     */
     function _addPresaleBalance(address presaleAccount, uint256 value) internal {
-        if(presaleAccount != address(0) && value <= _totalPresaleSupply) {
-            _totalPresaleSupply = _totalPresaleSupply.sub(value);
-            _presaleBalances[presaleAccount] = _presaleBalances[presaleAccount].add(value);
-            emit PresaleBalanceAdded(presaleAccount, value);
-        }
+        require(presaleAccount != address(0), "cannot add balance to the 0x0 account");
+        require(value <= _totalPresaleSupply, "");
+
+        _totalPresaleSupply = _totalPresaleSupply.sub(value);
+        _presaleBalances[presaleAccount] = _presaleBalances[presaleAccount].add(value);
+        emit PresaleBalanceAdded(presaleAccount, value);
     }
 
     /**
-    * @dev Calculate the total vesting allowance for this account (internal operation)
-    * @param months The account which is assigned presale holdings
-    * @param initial The initial percentage of this account's vesting schedule
-    * @param extended The extended percentage of this account's vesting schedule
-    * @return The total amount of tokens scheduled to be vested (excluding those tokens already vested)
+    * @dev Assign presale tokens to an account (internal operation)
+    * @param presaleAccount The account which is assigned presale holdings
+    * @param value The amount of tokens to be assigned to this account
     */
-    function _calcVestAllowance(uint256 months, uint256 initial, uint256 extended) internal returns (uint256) {
-        uint256 initialAllowance = _vestData[msg.sender].vestingBalance.mul(initial).div(1000000);
-        uint256 blocks = block.number.sub(vestingBlock);
+    function _subPresaleBalance(address presaleAccount, uint256 value) internal {
+        require(_presaleBalances[presaleAccount] > 0, "presaleAccount must have presale balance to subtract");
+        require(value <= _presaleBalances[presaleAccount], "value must be less than or equal to the presale Account balance");
 
-        uint256 multiplier = blocks.div(MONTH_BLOCKS);
-        
-        if(multiplier >= months) {
-            require(!_vestData[msg.sender].vested[months], "this phase has already been vested");
-            _vestData[msg.sender].vested[months] = true;
-            return _vestData[msg.sender].vestingBalance;
-        }
-        require(!_vestData[msg.sender].vested[multiplier], "this phase has already been vested");
-        uint256 extendedAllowance = _vestData[msg.sender].vestingBalance.mul(multiplier).mul(extended).div(1000000);
-        _vestData[msg.sender].vested[multiplier] = true;
-        return initialAllowance.add(extendedAllowance);
-    }
+        _totalPresaleSupply = _totalPresaleSupply.add(value);
+        _presaleBalances[presaleAccount] = _presaleBalances[presaleAccount].sub(value);
+        emit PresaleBalanceASubtracted(presaleAccount, value);
 
-    /**
-    * @dev Get the index of the vesting schedule for an account given its total balance of presale tokens and the contract vestign thresholds
-    * @param vestingBalance The total balance of presale tokens at the time of vesting
-    * @return The index of the vesting schedule to follow
-    */
-    function _getIndex(uint256 vestingBalance) internal view returns (uint256) {
-        uint256 index;
-        for (uint256 i = 0; i < _vestThresholds.length; i++) {
-            if(vestingBalance >= _vestThresholds[i]) {
-                index = i.add(uint256(1));
-            }
-        }
-        return index;
     }
 
 }
