@@ -18,4 +18,4 @@
 
 ### License
 
-All smart contracts and supplimentary code are released under [MIT](https://github.com/tubiex/smart-contracts/LICENSE).
+All smart contracts and supplimentary code are released under [MIT](https://github.com/tubiex/smart-contracts/blob/master/LICENSE).
