@@ -6,6 +6,8 @@ Nodejs v8+
 
 NPM v6+
 
+Linux based OS with bash terminal
+
 ### Installation
 
 1. Install Ganache (this step is unnecessary if you connect web3 to a live testnet or mainnet)
@@ -38,7 +40,11 @@ npm i
 
 You can use the keythereum npm module to create Ethereum accounts (or any other way you'd like)
 
-Navigate to the /keystore directory and place your account keystore file here 
+Create /keystore directory and place your account keystore file here 
+
+```
+mkdir keystore
+```
 
 5. Setup the environment
 
