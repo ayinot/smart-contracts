@@ -89,9 +89,10 @@ const sendSignedTx = (tx) => {
             web3.eth.sendSignedTransaction('0x' + tx.serialize().toString('hex'))
             .on('transactionHash', function (hash) {
                 console.log("transaction hash: " + hash);
+                resolve(hash);
             })                
             .on('receipt', function (receipt) {
-                resolve(receipt);
+                console.log("receipt: " + receipt);
             })
             .on('error', function (error) {
                 try {

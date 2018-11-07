@@ -5,7 +5,7 @@ const password = process.env.password; //  the password of the transaction sendi
 const presaleABI = require("../ABI/presale/IPresale.json");
 const presaleDeployment = process.env.presale;
 
-const build = require("./build.js");
+const transact = require("./transact.js");
 const presaleContract = build.getContractObject(presaleABI, presaleDeployment);
 
 
@@ -141,11 +141,11 @@ const initilize = (manager, presaleAllocation) => {
     return new Promise((resolve, reject) => {
         presaleContract.methods.initilize(presaleAllocation).encodeABI()
         .then(function(data){
-            build.buildTransaction(manager, presaleDeployment, "0x", data, 15000)
+            transact.buildTransaction(manager, presaleDeployment, "0x", data, 15000)
             .then(function(tx){
-                build.signTx(manager,tx)
+                transact.signTx(manager,tx)
                 .then(function(signed){
-                    build.sendSignedTx(signed)
+                    transact.sendSignedTx(signed)
                     .then(function(receipt){
                         console.log("receipt: " + receipt);
                         resolve(receipt);
@@ -173,11 +173,11 @@ const addPresaleBalance = (manager, presaleAccounts, values) => {
     return new Promise((resolve, reject) => {
         presaleContract.methods.addPresaleBalance(presaleAccounts, values).encodeABI()
         .then(function(data){
-            build.buildTransaction(manager, presaleDeployment, "0x", data, 15000)
+            transact.buildTransaction(manager, presaleDeployment, "0x", data, 15000)
             .then(function(tx){
-                build.signTx(manager,tx)
+                transact.signTx(manager,tx)
                 .then(function(signed){
-                    build.sendSignedTx(signed)
+                    transact.sendSignedTx(signed)
                     .then(function(receipt){
                         console.log("receipt: " + receipt);
                         resolve(receipt);
@@ -205,11 +205,11 @@ const subPresaleBalance = (manager, presaleAccounts, values) => {
     return new Promise((resolve, reject) => {
         presaleContract.methods.subPresaleBalance(presaleAccounts, values).encodeABI()
         .then(function(data){
-            build.buildTransaction(manager, presaleDeployment, "0x", data, 15000)
+            transact.buildTransaction(manager, presaleDeployment, "0x", data, 15000)
             .then(function(tx){
-                build.signTx(manager,tx)
+                transact.signTx(manager,tx)
                 .then(function(signed){
-                    build.sendSignedTx(signed)
+                    transact.sendSignedTx(signed)
                     .then(function(receipt){
                         console.log("receipt: " + receipt);
                         resolve(receipt);
@@ -238,11 +238,11 @@ const presaleTransfer = (manager, from, to, amount) => {
     return new Promise((resolve, reject) => {
         presaleContract.methods.presaleTransfer(from, to, amount).encodeABI()
         .then(function(data){
-            build.buildTransaction(manager, presaleDeployment, "0x", data, 15000)
+            transact.buildTransaction(manager, presaleDeployment, "0x", data, 15000)
             .then(function(tx){
-                build.signTx(manager,tx)
+                transact.signTx(manager,tx)
                 .then(function(signed){
-                    build.sendSignedTx(signed)
+                    transact.sendSignedTx(signed)
                     .then(function(receipt){
                         console.log("receipt: " + receipt);
                         resolve(receipt);
@@ -269,11 +269,11 @@ const setCrowdsale = (manager, TBNCrowdsale) => {
     return new Promise((resolve, reject) => {
         presaleContract.methods.setCrowdsale(TBNCrowdsale).encodeABI()
         .then(function(data){
-            build.buildTransaction(manager, presaleDeployment, "", data, 15000)
+            transact.buildTransaction(manager, presaleDeployment, "", data, 15000)
             .then(function(tx){
-                build.signTx(manager,tx)
+                transact.signTx(manager,tx)
                 .then(function(signed){
-                    build.sendSignedTx(signed)
+                    transact.sendSignedTx(signed)
                     .then(function(receipt){
                         console.log("receipt: " + receipt);
                         resolve(receipt);
@@ -305,11 +305,11 @@ const recoverTokens = (recoverer, accounts, to) => {
     return new Promise((resolve, reject) => {
         presaleContract.methods.recoverTokens(token).encodeABI()
         .then(function(data){
-            build.buildTransaction(recoverer, presaleDeployment, "0x", data, 15000)
+            transact.buildTransaction(recoverer, presaleDeployment, "0x", data, 15000)
             .then(function(tx){
-                build.signTx(manager,tx)
+                transact.signTx(manager,tx)
                 .then(function(signed){
-                    build.sendSignedTx(signed)
+                    transact.sendSignedTx(signed)
                     .then(function(receipt){
                         console.log("receipt: " + receipt);
                         resolve(receipt);

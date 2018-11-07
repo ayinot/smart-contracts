@@ -58,7 +58,7 @@ Choose your favorite txt editor and edit the .env file with the following
 ADDRESS = <your account address form step 4>
 PASSWORD = <the password you used to encrypt the account keystore file from step 4>
 ```
-4. Setup Ganache
+6. Setup Ganache
 
 In a terminal navigate to  the /scripts subdirectory and run the setup.js script
 ```
@@ -70,7 +70,7 @@ node setup.js
 setup.js calls the ganache-cli to start a ganache instance and imports your newly created account for usage as a deployer and transaction creator
 
 
-5. Compile, deploy and test smart contracts
+7. Compile, deploy and test smart contracts
 
 ```
 truffle compile --all
@@ -84,7 +84,15 @@ Compiles all contracts an places ther build files in /build/contracts. You can f
 #### Deploy
 
 The deploy process will create a newly deployed TBNERC20.sol, Presale.sol, and Crowdfund.sol instances.
-It will then update the .env file with the newly deployed addresses for these contracts in preparation for running contract specific scripts.
+Then update the .env file with the newly deployed addresses for these contracts in preparation for running contract specific scripts. To run the example test scripts the .env file should have the following entries and format.
+
+```
+ADDRESS = <the contract test address>
+PASSWORD = <encryption password for ADDRESS kyestore>
+TBNERC20 = <newly deployed erc20 address>
+PRESALE = <newly deployed presale address>
+CROWDSALE = <newly deployed crowdsale address>
+```
 
 ### Scripts
 
