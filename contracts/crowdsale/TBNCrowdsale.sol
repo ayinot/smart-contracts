@@ -12,46 +12,50 @@ import "../access/roles/RecoverRole.sol";
 contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
     using SafeMath for uint256;
 
-    uint256 private _numberOfIntervals;     // number of intervals in the sale
-    bytes32 private _hiddenCap;             // a hash of <the hidden hard cap(in WEI)>+"SECRET"+<a secret number> to be revealed if/when the hard cap is reached - does not rebase so choose wisely
+    uint256 private _numberOfIntervals;             // number of intervals in the sale (188)
+    bytes32 private _hiddenCap;                     // a hash of <the hidden hard cap(in WEI)>+<a secret number> to be revealed if/when the hard cap is reached - does not rebase so choose wisely
 
-    IERC20 private _erc20;                  // the TBN ERC20 token deployment
-    IPresale private _presale;              // the presale contract deployment
+    IERC20 private _erc20;                          // the TBN ERC20 token deployment
+    IPresale private _presale;                      // the presale contract deployment
                                                     // Note: 18 decimal precision accomodates ETH prices up to 10**5
     uint256 private _ETHPrice;                      // ETH price in USD with 18 decimal precision for calculating reserve pricing
-    uint256 private _reserveFloor;                  // the minimum possible reserve price in USD @ 18 decimal precision
-    uint256 private _reserveCeiling;                // the maximum possible reserve price in USD @ 18 decimal precision
-    uint256 private _reserveStep = 29166 * 10**10;  // the base amount to step down the price if reserve is not met @ 18 decimals of precision
+    uint256 private _reserveFloor;                  // the minimum possible reserve price in USD @ 18 decimal precision (set @ 0.0975 USD)
+    uint256 private _reserveCeiling;                // the maximum possible reserve price in USD @ 18 decimal precision (set @ 0.15 USD)
+    uint256 private _reserveStep;                   // the base amount to step down the price if reserve is not met @ 18 decimals of precision (0.15-.0975/188 = .0000279255)
 
-    uint256 private _crowdsaleAllocation;   // total amount of TBN allocated to the crowdsale contract for distribution
-    uint256 private _presaleDistribution;   // total amount of TBN distributed to account in the presale contract
+    uint256 private _crowdsaleAllocation;           // total amount of TBN allocated to the crowdsale contract for distribution
+    uint256 private _presaleDistribution;           // total amount of TBN distributed to accounts in the presale contract
 
-    uint256 private _rebaseNewPrice;        // temporarily holds the rebase ETH price until the next active interval @ decimal 18
-    uint256 private _rebaseSet;             // the interval the rebase is set in, set back to 0 after rebasing
+    uint256 private WEI_FACTOR = 10**18;            // ETH base in WEI
 
-    uint256 private WEI_FACTOR = 10**18;    // ETH base in WEI
+    uint256 private INTERVAL_BLOCKS = 5520;         // number of block per interval - 23 hours @ 15 sec per block
 
-    uint256 private INTERVAL_BLOCKS = 5520; // number of block per interval - 23 hours @ 15 sec per block
-    uint256 private REBASE_BLOCKS = 69120;  // number of blocks per rebase period - 12 days @ 15 sec per block
+    uint256 private _rebaseNewPrice;                // holds the rebase ETH price until rebasing in the next active interval @ decimal 18
+    uint256 private _rebased;                       // the interval the last rebase was set in, 0 if no rebasing has been done
     
-    uint256 private _startBlock;              // block number of the start of interval 0
+    uint256 private _startBlock;                    // block number of the start of interval 0
     
-    uint256 private _tokensPerInterval;       // number of tokens available for distribution each interval
+    uint256 private _tokensPerInterval;             // number of tokens available for distribution each interval
     
-    uint256 private _lastAdjustedInterval;    // number of tokens available for distribution each interval
+    uint256 private _lastAdjustedInterval;          // the most recent reserve adjusted interval
 
-
-    mapping (uint256 => uint256) public dailyTotals;
-    mapping (uint256 => bool) public rebased;
+    mapping (uint256 => uint256) public intervalTotals; // total ETH contributed per interval
 
     
     struct Interval {
         uint256 reservePrice;  // the reservePrice for this interval @ 18 decimals of precision
         uint256 ETHReserveAmount;
-        
     }
+
     mapping (uint256 => Interval) public intervals;
 
+    struct PresaleData {
+        uint256 balance;
+        uint256 remaining;
+        bool setup;
+    }
+
+    mapping (address => PresaleData) public presaleData;
 
     mapping (uint256 => mapping (address => uint256)) public participationAmount;
     mapping (uint256 => mapping (address => bool)) public claimed;
@@ -75,22 +79,19 @@ contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
         _;
     }
 
-    // check that re-serve adjustment is current and all are re-based 
-    modifier reChecks() {
+    // update reserve adjustment and execute rebasing if ETH price was rebased last interval
+    modifier update() {
         uint256 interval = getInterval(block.number);
-        if(_lastAdjustedInterval != interval){
-            for (uint i = _lastAdjustedInterval.add(1); i <= interval; i++) {
+        if(_lastAdjustedInterval != interval){ // check that the current interval was reserve adjusted
+            for (uint i = _lastAdjustedInterval.add(1); i <= interval; i++) { // if not catch up adjustment until current interval
                 _adjustReserve(i);
             }
             _lastAdjustedInterval = interval;
         }
-
-        if(_rebaseSet != 0){
-            require(_rebaseNewPrice != 0, "_rebaseNewPrice cannot equal zero");
-            // only after ajdustment is current can we rebase
+        // we can rebase only if reserve ETH ajdustment is current (done above)
+        if(_rebased == interval.sub(1)){ // check if the ETH price was rebased last interval
             _rebase(_rebaseNewPrice);
             _;
-            _rebaseSet = 0;
         } else {
             _;
         }
@@ -141,19 +142,19 @@ contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
         uint256 minETH;
         if (_ETHPrice < intervals[interval].reservePrice) {
             minETH = 10 ether;
-        } else if (_ETHPrice < intervals[interval].reservePrice.mul(uint256(10))) {
+        } else if (_ETHPrice < intervals[interval].reservePrice.mul(10)) {
             minETH = 1 ether;
-        } else if (_ETHPrice < intervals[interval].reservePrice.mul(uint256(100))) {
+        } else if (_ETHPrice < intervals[interval].reservePrice.mul(100)) {
             minETH = .1 ether;
-        } else if (_ETHPrice < intervals[interval].reservePrice.mul(uint256(1000))) {
+        } else if (_ETHPrice < intervals[interval].reservePrice.mul(1000)) {
             minETH = .01 ether;
         } else {
             minETH = .001 ether;
         }
+        return minETH;
     }
 
-    // This method provides the participant some protections regarding which
-    // day the participation is submitted and the maximum price prior to
+    // This method provides the participant some protections regarding the maximum price prior to
     // applying this payment that will be allowed. (price is in TBN per ETH)
     function participate(uint256 limit) public payable reChecks atStage(Stages.Crowdsale) returns (bool) {
         uint256 interval = getInterval(block.number);
@@ -161,10 +162,10 @@ contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
         require(msg.value >= getMin(), "minimum participation amount, enforced to prevent rounding errors in ");
 
         participationAmount[interval][msg.sender] = participationAmount[interval][msg.sender].add(msg.value);
-        dailyTotals[interval] = dailyTotals[interval].add(msg.value);
+        intervalTotals[interval] = intervalTotals[interval].add(msg.value);
 
         if (limit != 0) {
-            require(_tokensPerInterval.div(dailyTotals[interval]) <= limit, "");
+            require(_tokensPerInterval.div(intervalTotals[interval]) <= limit, "");
         }
 
         emit Participated(interval, msg.sender, msg.value);
@@ -175,26 +176,67 @@ contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
     function claim(uint256 interval) public reChecks atStage(Stages.Crowdsale) {
         require(stages == Stages.Crowdsale || stages == Stages.CrowdsaleEnded, "must be in the last two stages to call");
         require(getInterval(block.number) > interval, "the given interval must be less than the current interval");
-
-        if (claimed[interval][msg.sender] || dailyTotals[interval] == 0) {
-            return;
+        
+        uint256 intervalClaim;
+        
+        if (_presale.presaleBalanceOf(account) == 0){
+            if (claimed[interval][msg.sender] || intervalTotals[interval] == 0) {
+                return;
+            }
         }
 
-        //uint256 claiming = dailyTotals[interval].mul(WEI_FACTOR).div(tokensPerInterval).mul(participationAmount[interval][msg.sender]);
-        
-        uint256 contributorProportion = participationAmount[interval][msg.sender].mul(WEI_FACTOR).div(dailyTotals[interval]);
+        uint256 contributorProportion = participationAmount[interval][msg.sender].mul(WEI_FACTOR).div(intervalTotals[interval]);
         uint256 reserveMultiplier;
-        if (dailyTotals[interval] >= intervals[interval].ETHReserveAmount){
+        if (intervalTotals[interval] >= intervals[interval].ETHReserveAmount){
             reserveMultiplier = WEI_FACTOR;
         } else {
-            reserveMultiplier = dailyTotals[interval].mul(WEI_FACTOR).div(intervals[interval].ETHReserveAmount);
+            reserveMultiplier = intervalTotals[interval].mul(WEI_FACTOR).div(intervals[interval].ETHReserveAmount);
         }
-        uint256 intervalClaim = _tokensPerInterval.mul(contributorProportion).mul(reserveMultiplier).div(WEI_FACTOR.mul(3));
+
+        intervalClaim = _tokensPerInterval.mul(contributorProportion).mul(reserveMultiplier).div(WEI_FACTOR.mul(3));
+
+        // presale vesting
+        intervalClaim = intervalClaim.add(_presaleVesting(msg.sender));
 
         claimed[interval][msg.sender] = true;
         _erc20.transfer(msg.sender, intervalClaim);
 
         emit Claimed(interval, msg.sender, intervalClaim);
+    }
+
+    function _presaleVesting(address account) internal returns (uint256) {
+
+        if(!presaleData[account].setup){ // intial assignment of an account's presale data
+            uint256 totalPresaleAmount = _presale.presaleBalanceOf(account);
+            presaleData[account].balance = totalPresaleAmount;
+            presaleData[account].remaining = totalPresaleAmount;
+            presaleData[account].setup = true;
+        }
+        
+        uint256 vestRate;
+        if(presaleData[account].balance <= _numberOfIntervals.mul(10**20)){
+            vestRate = 10**20; // this is 100 TBN (100 TBN is the minimum vesting amount per interval - except on last vest for account, vesting all remaining could be smaller)
+        } else {
+            vestRate = presaleData[account].balance.div(_numberOfIntervals);
+        }
+
+        assert(vestRate >= 10**20); // the above guarantees this
+
+        if (presaleData[account].remaining > 0){ // check if there is any remaining balance to vest
+            if (vestRate <= presaleData[account].remaining) { // check if set vest rate is <= remaining
+                presaleData[account].remaining = presaleData[account].remaining.sub(vestRate);
+                emit PresaleVest(account, vestRate);
+                return vestRate;
+            } else {
+                vestRate = presaleData[account].remaining; // vest all remaining, as it is less than this accounts interval vest amount
+                presaleData[account].remaining = presaleData[account].remaining.sub(vestRate);
+                emit PresaleVest(account, vestRate);
+                return vestRate;
+            }
+        } else { // no remaining balance to vest
+            return 0;
+        }
+        
     }
 
     function claimAll() public atStage(Stages.Crowdsale) {
@@ -216,7 +258,7 @@ contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
     {
         require(ETHPrice > 0, "ETH basis price must be greater than 0"); 
         require(reserveFloor > 0, "the reserve floor must be greater than 0");
-        require(reserveCeiling > reserveFloor, "the reserve ceiling must be greater than the reserve floor");
+        require(reserveCeiling > reserveFloor.add(_numberOfIntervals), "the reserve ceiling must be _numberOfIntervals WEI greater than the reserve floor");
         require(crowdsaleAllocation > 0, "crowdsale allocation must be assigned a number greater than 0");
         
         address fundkeeper = _erc20.fundkeeper();
@@ -227,14 +269,12 @@ contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
         _crowdsaleAllocation = crowdsaleAllocation;
         _reserveFloor = reserveFloor;
         _reserveCeiling = reserveCeiling;
+        _reserveStep = (_reserveCeiling.sub(_reserveFloor)).div(_numberOfIntervals);
         
         // calc initial intervalReserve
         uint256 interval = getInterval(block.number);
-        intervals[interval].reservePrice = reserveCeiling;
-        intervals[interval].ETHReserveAmount = _tokensPerInterval.mul(intervals[interval].reservePrice.mul(WEI_FACTOR).div(_ETHPrice));
-        
-        
-        rebased[_rebaseFor(block.number)] = true;
+        intervals[interval].reservePrice = (_reserveCeiling.mul(WEI_FACTOR)).div(_ETHPrice);
+        intervals[interval].ETHReserveAmount = _tokensPerInterval.mul(intervals[interval].reservePrice);
 
         // place crowdsale allocation in this contract
         _erc20.transferFrom(fundkeeper, address(this), crowdsaleAllocation);
@@ -261,12 +301,12 @@ contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
         return true;
     }
 
-    // crowdsale manager can rebase the ETH price once ever 12 days
+    // crowdsale manager can rebase the ETH price (rebase will be applied to the next interval)
     function setRebase(uint256 newETHPrice) external onlyManager atStage(Stages.Crowdsale) returns (bool) {
-        uint256 rebasePeriod = _rebaseFor(block.number);
-        require(!rebased[rebasePeriod], "rebase has been successfully run for this period, cannot rebase again");
+        uint256 interval = getInterval(block.number);
+        require(interval > 0, "cannot rebase in the initial interval");
         _rebaseNewPrice = newETHPrice;
-        _rebaseSet = block.number;
+        _rebased = interval;
         return true;
     }
 
@@ -287,34 +327,24 @@ contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
     }
 
     function _rebase(uint256 newETHPrice) internal onlyManager atStage(Stages.Crowdsale) {
-        uint256 setRebasePeriod = _rebaseFor(_rebaseSet);
-        uint256 rebasePeriod = _rebaseFor(block.number);
         uint256 interval = getInterval(block.number);
-        require(setRebasePeriod == rebasePeriod, "current rebase period must match the period when this rebase was initiated");
-        
+
         // new ETH base price
         _ETHPrice = newETHPrice;
 
-        // recalc intervals reserve amount
-        intervals[interval].ETHReserveAmount = _tokensPerInterval.mul(intervals[interval].reservePrice.mul(WEI_FACTOR).div(_ETHPrice));
+        // recalc ETH reserve Price
+        intervals[interval].reservePrice = (_reserveCeiling.mul(WEI_FACTOR)).div(_ETHPrice);
+        // recalc ETH reserve amount
+        intervals[interval].ETHReserveAmount = _tokensPerInterval.mul(intervals[interval].reservePrice);
 
-        rebased[rebasePeriod] = true;   // rebase has been successfully run
-        _rebaseSet = 0;                 // _rebaseSet block number back to 0
-        
+        // reset _rebaseNewPrice to 0
+        _rebaseNewPrice = 0;
+
         emit Rebased(
             _ETHPrice,
             intervals[interval].ETHReserveAmount
         );
     } 
-
-    // Each rebase cycle is 12 days long (total of 15 rebase periods during the sale)
-    //
-    function _rebaseFor(uint256 blockNumber) internal view returns (uint256) {
-        return blockNumber < _startBlock
-            ? 0
-            : blockNumber.sub(_startBlock).div(REBASE_BLOCKS);
-    }
-
 
     // Each window is 23 hours long so that end-of-window rotates
     // around the clock for all timezones.
@@ -325,28 +355,30 @@ contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
     }
 
     function _adjustReserve(uint256 interval) internal {
-        require(_lastAdjustedInterval.add(uint256(1)) == interval, "must adjust exactly the next interval");
+        require(interval > 0, "cannot adjust the intial interval reserve");
         // get last reserve info
-        uint256 lastIntervalPrice = dailyTotals[_lastAdjustedInterval].mul(WEI_FACTOR).div(_tokensPerInterval); // token price in ETH
-        uint256 lastAmount = intervals[_lastAdjustedInterval].ETHReserveAmount;
+        uint256 lastReserveAmount = intervals[interval.sub(1)].ETHReserveAmount;
+        uint256 lastIntervalPrice = intervals[interval.sub(1)].reservePrice;
 
         // check if last reserve was met
         uint256 adjustment;
         // adjust reservePrice accordingly
-        if (dailyTotals[_lastAdjustedInterval] >= lastAmount){
-            if(lastIntervalPrice >= _reserveCeiling){
-                intervals[interval].reservePrice = _reserveCeiling;
-            } else {
-                intervals[interval].reservePrice = dailyTotals[_lastAdjustedInterval].mul(_ETHPrice).div(_tokensPerInterval);
+        if (intervalTotals[interval.sub(1)] >= lastReserveAmount){ // reserve ETH was met last interval
+            uint ceiling = (_reserveCeiling.mul(WEI_FACTOR)).div(_ETHPrice);
+            if(lastReserveAmount == _tokensPerInterval.mul(ceiling)){ // lastReserveAmount was equal to the max reserve ETH
+                intervals[interval].reservePrice = ceiling; // reserve price cannot go above ceiling
+            } else { // reserve met but lastReserveAmount was less than max reserve
+                intervals[interval].reservePrice = intervalTotals[interval.sub(1)].mul(_ETHPrice).div(_tokensPerInterval);
+                intervals[interval].ETHReserveAmount = _tokensPerInterval.mul(intervals[interval].reservePrice);
             }
         } else {
-            uint256 offset = WEI_FACTOR.sub(dailyTotals[_lastAdjustedInterval].mul(WEI_FACTOR).div(intervals[_lastAdjustedInterval].ETHReserveAmount));
+            uint256 offset = WEI_FACTOR.sub(intervalTotals[_lastAdjustedInterval].mul(WEI_FACTOR).div(intervals[_lastAdjustedInterval].ETHReserveAmount));
             if (offset < 10**17) {
-                adjustment = uint256(1);
+                adjustment = 1;
             } else if(offset != WEI_FACTOR) {
-                adjustment = (offset.div(10**17)).add(uint256(1));
+                adjustment = (offset.div(10**17)).add(1);
             } else {
-                adjustment = uint256(10);
+                adjustment = 10;
             }
 
             uint256 newReservePrice = intervals[interval].reservePrice.sub(_reserveStep.mul(adjustment));
@@ -361,111 +393,3 @@ contract TBNCrowdSale is ICrowdsale, ManagerRole, RecoverRole, FundkeeperRole {
     }
 
 }
-
-
-
-
-    /**
-    * @dev Calculate the total vesting allowance for this account (internal operation)
-    * @param months The account which is assigned presale holdings
-    * @param initial The initial percentage of this account's vesting schedule
-    * @param extended The extended percentage of this account's vesting schedule
-    * @return The total amount of tokens scheduled to be vested (excluding those tokens already vested)
-    
-    function _calcVestAllowance(uint256 months, uint256 initial, uint256 extended) internal returns (uint256) {
-        uint256 initialAllowance = _vestData[msg.sender].vestingBalance.mul(initial).div(1000000);
-        uint256 blocks = block.number.sub(vestingBlock);
-
-        uint256 multiplier = blocks.div(MONTH_BLOCKS);
-        
-        if(multiplier >= months) {
-            require(!_vestData[msg.sender].vested[months], "this phase has already been vested");
-            _vestData[msg.sender].vested[months] = true;
-            return _vestData[msg.sender].vestingBalance;
-        }
-        require(!_vestData[msg.sender].vested[multiplier], "this phase has already been vested");
-        uint256 extendedAllowance = _vestData[msg.sender].vestingBalance.mul(multiplier).mul(extended).div(1000000);
-        _vestData[msg.sender].vested[multiplier] = true;
-        return initialAllowance.add(extendedAllowance);
-    }
-
-    /**
-    * @dev Get the index of the vesting schedule for an account given its total balance of presale tokens and the contract vestign thresholds
-    * @param vestingBalance The total balance of presale tokens at the time of vesting
-    * @return The index of the vesting schedule to follow
-    
-    function _getIndex(uint256 vestingBalance) internal view returns (uint256) {
-        uint256 index;
-        for (uint256 i = 0; i < _vestThresholds.length; i++) {
-            if(vestingBalance >= _vestThresholds[i]) {
-                index = i.add(uint256(1));
-            }
-        }
-        return index;
-    }
-
-        mapping (address => VestData) private _vestData;
-    
-    struct VestData {
-        mapping (uint256 => bool) vested; // flag if current pahse has already vested
-        uint256 vestingBalance; // the account balance when the vesting period started
-        uint256 vestingPeriod; // the total number of blocks this account is vested for
-        uint256 vestedAmount; // the amount of tokens already vested
-        bool vestApproved; // system flag to approve vesting
-         
-    }
-
-        /**
-    * @dev Gets the amount of token already vest and sent out of this contract
-    * @param account The address to vested amount
-    * @return The total amount of tokens vested by this account
-    
-    function getVestedAmount(address account) public view atStage(Stages.Vesting) returns (uint256) {
-        return _vestData[account].vestedAmount;
-    }
-
-
-    /**
-    * @dev Vest and transfer any available vesting tokens based on schedule and approval
-    * @return True when successful
-    
-    function vest() external atStage(Stages.Vesting) returns (bool){
-        uint256 currentBalance = _presaleBalances[msg.sender];
-        require(currentBalance > 0, "must have tokens to vest");
-        
-        if( _vestData[msg.sender].vestingBalance == 0 ) { // first vest call sets vestingBalance
-            _vestData[msg.sender].vestingBalance = currentBalance;
-        }
-
-        uint256 index = _getIndex(_vestData[msg.sender].vestingBalance);
-        if(index > 0){ // not lowest tier follow the schedule
-            uint256 months = _vestSchedules[index.sub(uint256(1))].months;
-            uint256 initial = _vestSchedules[index.sub(uint256(1))].initial;
-            uint256 extended = _vestSchedules[index.sub(uint256(1))].extended;
-            if( _vestData[msg.sender].vestApproved == false ) { // first vest call sets vestApproved for higher tiers
-                _vestData[msg.sender].vestApproved = true;
-                emit VestApproved(msg.sender);
-            }
-        } else { // lowest tier can vest all but needs manager approval
-            require(_vestData[msg.sender].vestApproved, "must be approved by manager role to prevent sybil attacks");
-            _vestData[msg.sender].vestedAmount = currentBalance;
-            _presaleBalances[msg.sender] = _presaleBalances[msg.sender].sub(currentBalance);
-            emit Vested(msg.sender, currentBalance);
-            erc20.transfer(msg.sender, currentBalance);
-            return true;
-        }
-        
-        if( _vestData[msg.sender].vestingPeriod == 0 ){ // first vest call sets vestingPeriod
-            _vestData[msg.sender].vestingPeriod = MONTH_BLOCKS.mul(months); // these should be set to an internal map with struct for all vesting info
-        }
-        uint256 totalAllowance = _calcVestAllowance(months, initial, extended);
-
-        uint vestAmount = totalAllowance.sub(_vestData[msg.sender].vestedAmount);
-
-        _vestData[msg.sender].vestedAmount = _vestData[msg.sender].vestedAmount.add(vestAmount);
-        _presaleBalances[msg.sender] = _presaleBalances[msg.sender].sub(vestAmount);
-        emit Vested(msg.sender, vestAmount);
-        erc20.transfer(msg.sender, vestAmount);
-        return true;
-    }
-    */
