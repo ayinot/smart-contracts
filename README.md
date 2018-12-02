@@ -21,7 +21,7 @@ To install Ganache visit [the Ganache website](https://truffleframework.com/gana
 npm i truffle -g
 ```
 
-Node: If your truffle version is less then v4.1.14, you need to manually [update solidity to v0.4.25.](https://www.google.com)
+Note: If your truffle version is less then v4.1.14, you need to manually [update solidity to v0.4.25.](https://www.google.com)
 
 ```
 cd /usr/local/lib/node_modules/truffle

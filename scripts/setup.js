@@ -1,10 +1,10 @@
-require('dotenv').config();
+require('dotenv').load();
 const ganache = require("ganache-cli");
 const Web3 = require('web3');
 const BigNumber = require('bignumber.js');
 const transact = require('./transact.js');
-const address = process.env.address;
-const password = process.env.password;
+const address = process.env.ADDRESS;
+const password = process.env.PASSWORD;
 const startETH = new BigNumber("1000000000000000000000000");
 const value = Web3.utils.stringToHex(startETH.toString());
 

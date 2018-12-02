@@ -2,9 +2,9 @@
 require('dotenv').config();
 const transact = require("./scripts/transact.js");
 const PrivateKeyProvider = require("truffle-privatekey-provider");
-const account = process.env.address;
-const password = process.env.password;
-const privKey = transact.getPrivateKey(account, "./", password).then(function(privateKey){return privateKey;});
+const account = process.env.ADDRESS;
+const password = process.env.PASSWORD;
+// const privKey = transact.getPrivateKey(account, "./", password).then(function(privateKey){return privateKey;});
 
 module.exports = {
   networks: {
