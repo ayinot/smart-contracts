@@ -23,7 +23,7 @@ contract Airdrop is IAirdrop, ManagerRole, RecoverRole {
         uint256 claimBlock;
     }
 
-    mapping (address => airdropData) private _airdropData;
+    mapping (address => airDropData) private _airdropData;
 
     
     uint256 private _allocation;
@@ -55,7 +55,7 @@ contract Airdrop is IAirdrop, ManagerRole, RecoverRole {
 
     /**
     * @dev Constructor
-    * @param token_ TBNERC20 token contract
+    * @param token TBNERC20 token contract
     */
     constructor(
         IERC20 token
@@ -78,7 +78,7 @@ contract Airdrop is IAirdrop, ManagerRole, RecoverRole {
     */
     function recoverTokens(IERC20 token) external onlyRecoverer returns (bool) {
         if (token == _erc20){
-            require(stages >= 2, "if recovering TBN must have progressed to AirDropEnded");
+            require(uint(stages) >= 2, "if recovering TBN must have progressed to AirDropEnded");
         }
         uint256 recovered = token.balanceOf(address(this));
         token.transfer(msg.sender, recovered);
@@ -128,7 +128,7 @@ contract Airdrop is IAirdrop, ManagerRole, RecoverRole {
         uint256 claimAmount = _claimAmount(msg.sender);
         require(claimAmount > 0, "claimAmount must be greater than 0 to claim - 0 indicates that this account has already claimed this period or has a balance of 0");
         emit AirdropClaim(msg.sender, claimAmount);
-        address(_erc20).transfer(msg.sender, claimAmount);
+        _erc20.transfer(msg.sender, claimAmount);
         return true;
     }
 
@@ -235,8 +235,8 @@ contract Airdrop is IAirdrop, ManagerRole, RecoverRole {
         require(account != address(0), "cannot add balance to the 0x0 account");
         require(value <= _totalSupply, "cannot add more allocation to an account than is remaining in the airdrop supply");
         
-        if(airdropData[account].claimBlock == 0){ // if this account hasn't been allocated tokens before, set the claimBlock to the current block number
-            airdropData[account].claimBlock = block.number;
+        if(_airdropData[account].claimBlock == 0){ // if this account hasn't been allocated tokens before, set the claimBlock to the current block number
+            _airdropData[account].claimBlock = block.number;
         }
 
         _totalSupply = _totalSupply.sub(value);
@@ -254,7 +254,7 @@ contract Airdrop is IAirdrop, ManagerRole, RecoverRole {
     */
     function _subBalance(address account, uint256 value) internal {
         require(_airdropData[account].balance > 0, "airdropAccount must have airdrop balance to subtract");
-        require(value <= _airdropData[account].balance], "value must be less than or equal to the airdrop Account balance");
+        require(value <= _airdropData[account].balance, "value must be less than or equal to the airdrop Account balance");
 
         _totalSupply = _totalSupply.add(value);
 
@@ -278,8 +278,8 @@ contract Airdrop is IAirdrop, ManagerRole, RecoverRole {
         _airdropData[from].allocation = _airdropData[from].allocation.sub(value);
         _airdropData[from].balance = _airdropData[from].balance.sub(value);
 
-        if(airdropData[to].claimBlock == 0){ // if the to account hasn't been allocated tokens before, set the claimBlock to the current block number
-            airdropData[to].claimBlock = block.number;
+        if(_airdropData[to].claimBlock == 0){ // if the to account hasn't been allocated tokens before, set the claimBlock to the current block number
+            _airdropData[to].claimBlock = block.number;
         }
 
         _airdropData[to].allocation = _airdropData[to].allocation.add(value);
@@ -306,10 +306,10 @@ contract Airdrop is IAirdrop, ManagerRole, RecoverRole {
         if(_airdropData[account].balance  <= 10**20){
             claim = 10**20; // this is 100 TBN (100 TBN is the minimum claiming amount per interval when balance can support)
         } else {
-            claim = _presaleData[account].allocation.mul(intervals).div(100);
+            claim = _airdropData[account].allocation.mul(intervals).div(100);
         }
 
-        if (_presaleData[account].balance > 0){ // check if there is any remaining balance to claim
+        if (_airdropData[account].balance > 0){ // check if there is any remaining balance to claim
             if (claim < _airdropData[account].balance) { // check if the claim is < balance
                 _airdropData[account].balance = _airdropData[account].balance.sub(claim);
                 _airdropData[account].claimBlock = _airdropData[account].claimBlock.add(CLAIM_PERIOD.mul(intervals));
